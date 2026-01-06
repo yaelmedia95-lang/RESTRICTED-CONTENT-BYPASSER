@@ -16,7 +16,7 @@ from flask import Flask
 # --- 1. RENDER WEB SUNUCUSU ---
 app = Flask(__name__)
 @app.route('/')
-def home(): return "YaelSaver Auto-Full Active!"
+def home(): return "YaelSaver with Emergency Brake!"
 def run_web(): app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
 # --- 2. AYARLAR ---
@@ -25,16 +25,19 @@ API_HASH = os.environ.get("API_HASH", "")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 SESSION_STRING = os.environ.get("SESSION_STRING", "") 
 
-# SENİN ID'N (Bunu düzeltmeyi unutma)
+# SENİN ID'N
 ADMINS = [8291313483] 
 
 WATERMARK_TEXT = "TG:StreetagencyTR"
+
+# EL FRENİ İÇİN GLOBAL DEĞİŞKEN
+STOP_FLAGS = {} 
 
 # --- 3. İSTEMCİLER ---
 bot = TelegramClient('bot_sess', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 userbot = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
-# --- 4. MARKALAMA (AYNI) ---
+# --- 4. MARKALAMA MOTORU ---
 def check_font():
     if not os.path.exists("font.ttf"):
         try:
@@ -75,22 +78,19 @@ def add_watermark(input_path):
     except: return input_path
     return input_path
 
-# --- 5. YENİ LİNK ÇÖZÜCÜ (SAYISIZ LİNK DESTEĞİ) ---
+# --- 5. YARDIMCI ---
 def parse_link(link):
-    data = {"peer": None, "msg_id": 1} # Varsayılan 1 (En baş)
+    data = {"peer": None, "msg_id": 1}
     link = link.strip()
     try:
         if "t.me/c/" in link: 
             parts = link.split("t.me/c/")[1].split("?")[0].split("/")
             data["peer"] = int("-100" + parts[0])
-            # Eğer linkin sonunda sayı varsa al, yoksa 1 kalsın
-            if len(parts) >= 2 and parts[-1].isdigit(): 
-                data["msg_id"] = int(parts[-1])
+            if len(parts) >= 2 and parts[-1].isdigit(): data["msg_id"] = int(parts[-1])
         elif "t.me/" in link: 
             parts = link.split("t.me/")[1].split("?")[0].split("/")
             data["peer"] = parts[0]
-            if len(parts) >= 2 and parts[-1].isdigit(): 
-                data["msg_id"] = int(parts[-1])
+            if len(parts) >= 2 and parts[-1].isdigit(): data["msg_id"] = int(parts[-1])
     except: pass
     return data
 
@@ -106,7 +106,7 @@ async def progress_callback(current, total, event, last_update_time):
 
 @bot.on(events.NewMessage(pattern='/start'))
 async def start(event):
-    await event.respond(f"👋 **YaelSaver Full-Auto**\n\nLinkin sonuna sayı yazmazsan en baştan başlar.")
+    await event.respond(f"👋 **YaelSaver + El Freni**\n\nİşlemi durdurmak için `/iptal` yazabilirsin.")
 
 # KATIL
 @bot.on(events.NewMessage(pattern='/katil'))
@@ -119,18 +119,27 @@ async def join_channel(event):
         await event.respond("✅ Girdim.")
     except Exception as e: await event.respond(f"❌ Hata: {e}")
 
-# MEDYA TRANSFER (OTOMATİK BAŞLANGIÇLI)
+# --- YENİ KOMUT: İPTAL (EL FRENİ) ---
+@bot.on(events.NewMessage(pattern='/iptal'))
+async def stop_process(event):
+    if event.sender_id not in ADMINS: return
+    
+    # Bayrağı kaldır
+    STOP_FLAGS[event.sender_id] = True
+    await event.respond("🛑 **EL FRENİ ÇEKİLDİ!**\n\nMevcut dosya biter bitmez işlem durdurulacak.\nLütfen bekleyin...")
+
+# --- MEDYA TRANSFER ---
 @bot.on(events.NewMessage(pattern='/medya'))
 async def media_transfer(event):
     if event.sender_id not in ADMINS: return await event.respond("🔒 Yetkisiz.")
     try: args = event.text.split(); src_l, dst_l = args[1], args[2]
     except: return await event.respond("⚠️ `/medya [Kaynak] [Hedef]`")
 
-    status = await event.respond("♻️ **Kanal Taranıyor... (En Baştan)**")
+    status = await event.respond("♻️ **Analiz...**\nDurdurmak için `/iptal` yaz.")
     src = parse_link(src_l); dst = parse_link(dst_l)
     
-    # Eğer kullanıcı sayı belirtmediyse parse_link otomatik 1 döndürür.
-    start_id = src["msg_id"]
+    # Başlarken bayrağı indir (Reset)
+    STOP_FLAGS[event.sender_id] = False
 
     try:
         input_ch = await userbot.get_input_entity(src["peer"])
@@ -138,8 +147,15 @@ async def media_transfer(event):
         count = 0
         skipped = 0
         
-        # 1. Mesajdan (veya belirtilenden) başla, Sona kadar git
-        async for msg in userbot.iter_messages(input_ch, min_id=(start_id-1), reverse=True):
+        async for msg in userbot.iter_messages(input_ch, min_id=(src["msg_id"]-1), reverse=True):
+            
+            # --- EL FRENİ KONTROLÜ ---
+            if STOP_FLAGS.get(event.sender_id, False):
+                await status.edit(f"🛑 **İŞLEM İPTAL EDİLDİ!**\n\n✅ Taşınan: {count}\n🗑 Atlanan: {skipped}\n\nSistem durdu.")
+                STOP_FLAGS[event.sender_id] = False # Sıfırla
+                return # Döngüden ve fonksiyondan çık
+            # -------------------------
+
             if isinstance(msg, MessageService): continue
             
             if not msg.media: 
@@ -159,7 +175,7 @@ async def media_transfer(event):
                 path = await userbot.download_media(msg, progress_callback=lambda c, t: progress_callback(c, t, dl_msg, last_time) if dl_msg else None)
 
                 # Markala
-                if dl_msg: await dl_msg.edit("⚙️ **Marka Basılıyor...**")
+                if dl_msg: await dl_msg.edit("⚙️ **Markalanıyor...**")
                 new_path = await asyncio.to_thread(add_watermark, path)
 
                 # Yükle (YAZISIZ)
@@ -181,10 +197,27 @@ async def media_transfer(event):
         await status.edit(f"✅ **BİTTİ!**\n📸 Toplam: {count}")
     except Exception as e: await status.edit(f"❌ Hata: {str(e)}")
 
+# TEKLİ
+@bot.on(events.NewMessage(pattern='/tekli'))
+async def single(event):
+    try: link = event.text.split()[1]
+    except: return await event.respond("Link?")
+    inf = parse_link(link)
+    msg = await event.respond("⬇️ İndiriliyor...")
+    try:
+        m = await userbot.get_messages(inf["peer"], ids=inf["msg_id"])
+        path = await userbot.download_media(m)
+        new_path = await asyncio.to_thread(add_watermark, path)
+        await bot.send_file(event.chat_id, new_path, caption="") 
+        os.remove(path); 
+        if new_path != path: os.remove(new_path)
+        await msg.delete()
+    except Exception as e: await msg.edit(f"Hata: {e}")
+
 # MAIN
 def main():
     threading.Thread(target=run_web).start()
-    print("🚀 Auto-Start Ready!")
+    print("🚀 YaelSaver Brake Edition Started!")
     userbot.start()
     bot.run_until_disconnected()
 
