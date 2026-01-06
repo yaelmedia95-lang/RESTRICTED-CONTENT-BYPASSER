@@ -23,7 +23,8 @@ API_ID = int(os.environ.get("API_ID", "0"))
 API_HASH = os.environ.get("API_HASH", "")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 SESSION_STRING = os.environ.get("SESSION_STRING", "") 
-ADMINS = list(map(int, os.environ.get("ALLOWED_USERS", "").split(","))) if os.environ.get("ALLOWED_USERS") else []
+# Kendi ID'ni buraya sayı olarak yaz. Tırnak koyma!
+ADMINS = [8291313483]
 OWNER_CONTACT = "@yasin33" 
 
 # MARKALAMA AYARLARI
@@ -168,7 +169,14 @@ async def single(event):
         if os.path.exists(new_path) and new_path != path: os.remove(new_path)
         await msg.delete()
     except Exception as e: await msg.edit(f"Hata: {e}")
-
+        
+@bot.on(events.NewMessage(pattern='/id'))
+async def my_id(event):
+    # Bu komut senin ID'ni ve Admin olup olmadığını söyler
+    uid = event.sender_id
+    is_admin = uid in ADMINS
+    await event.respond(f"🆔 **Senin ID:** `{uid}`\n👮 **Admin Yetkisi:** {is_admin}")
+    
 @bot.on(events.NewMessage(pattern='/medya'))
 async def media_transfer(event):
     if event.sender_id not in ADMINS: return await event.respond("🔒 Sadece Admin.")
@@ -227,7 +235,33 @@ async def media_transfer(event):
 
         await status.edit(f"✅ **BİTTİ!** Toplam: {count}")
     except Exception as e: await status.edit(f"Hata: {e}")
+# --- MODÜL: KATIL (/katil) ---
+@bot.on(events.NewMessage(pattern='/katil'))
+async def join_channel(event):
+    # Sadece adminler kullanabilsin (İsteğe bağlı, herkes kullansın dersen bu satırı sil)
+    if event.sender_id not in ADMINS: return await event.respond("🔒 Sadece Admin.")
 
+    try: link = event.text.split()[1]
+    except: return await event.respond("⚠️ **Kullanım:** `/katil [Davet Linki]`")
+    
+    msg = await event.respond("🔐 **Giriş deneniyor...**")
+    
+    try:
+        # Davet linki ise (t.me/+AbCd...)
+        if "+" in link or "joinchat" in link:
+            hash_code = link.split('+')[-1]
+            await userbot(ImportChatInviteRequest(hash_code))
+        # Normal link ise (t.me/kanaladi)
+        else:
+            username = link.replace("https://t.me/", "").replace("t.me/", "")
+            await userbot(JoinChannelRequest(username))
+            
+        await msg.edit("✅ **Başarıyla Katıldım!**\nŞimdi `/medya` komutunu kullanabilirsin.")
+        
+    except UserAlreadyParticipantError:
+        await msg.edit("✅ **Zaten Üyeyim.** Sorun yok, devam et.")
+    except Exception as e:
+        await msg.edit(f"❌ **Giremedim:** `{str(e)}`\nLinkin doğru olduğundan veya banlı olmadığından emin ol.")
 # --- MAIN ---
 def main():
     threading.Thread(target=run_web).start()
