@@ -1,5 +1,2 @@
-telethon
-flask
-pillow
-requests
-cryptg
+pyrogram
+tgcrypto
