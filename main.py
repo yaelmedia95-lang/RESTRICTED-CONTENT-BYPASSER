@@ -1,34 +1,54 @@
 import os
 import asyncio
 import logging
+from threading import Thread
+from flask import Flask
 from pyrogram import Client, filters, idle
-from pyrogram.errors import FloodWait, UserAlreadyParticipant
+from pyrogram.errors import FloodWait
 
-# ==================== AYARLAR ====================
-API_ID = 36435345
-API_HASH = "28cfcf7036020a54feadb2d8b29d94d0"
-BOT_TOKEN = "8440950309:AAFvLpo6vGgHobQ_nVvEYznXxQ-lOJaZdoI"
-SESSION = "AQIr9ZEAUCTYUJZlXguOCl_q1zJUgBSGOvrc4NPxDp2yEAfuKPU48S_eaQRcYzopnGP7yrD1CA5NSmiw1U218k1tJ74lO8vsdPeYpGCLjhqhR8ij3Ojklac1iLoHQIhnD1_o57tS9LR8Qqva2fS-thC74U5movfvj-2bIw_ZeZHo9CZo0c-QF-WAVj6aNDNVO4OTA9tP9xmDSJpiAAdWu02PSLLwbcWCnsmg7Z1dAjKEZtksSw1aCimCXsbAmswyMAlF1OJc4oN5fWdPfnG9XBEQtIrfg8zj2bXwkDHRITknFAX9F9Ay7FW1gP_CpSRSMYdtC9RsbUrdb7xQ-z_yDFr0q0kS1wAAAAHi9E9wAA"
+# ==================== AYARLAR (Render Environment'tan Çeker) ====================
+# Eğer Render'a Env girmeyi beceremezsen tırnak içlerine kendi bilgilerini yazabilirsin.
+API_ID = int(os.environ.get("API_ID", "36435345"))
+API_HASH = os.environ.get("API_HASH", "28cfcf7036020a54feadb2d8b29d94d0")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8440950309:AAFvLpo6vGgHobQ_nVvEYznXxQ-lOJaZdoI")
+SESSION = os.environ.get("SESSION_STRING", "AQIr9ZEAUCTYUJZlXguOCl_q1zJUgBSGOvrc4NPxDp2yEAfuKPU48S_eaQRcYzopnGP7yrD1CA5NSmiw1U218k1tJ74lO8vsdPeYpGCLjhqhR8ij3Ojklac1iLoHQIhnD1_o57tS9LR8Qqva2fS-thC74U5movfvj-2bIw_ZeZHo9CZo0c-QF-WAVj6aNDNVO4OTA9tP9xmDSJpiAAdWu02PSLLwbcWCnsmg7Z1dAjKEZtksSw1aCimCXsbAmswyMAlF1OJc4oN5fWdPfnG9XBEQtIrfg8zj2bXwkDHRITknFAX9F9Ay7FW1gP_CpSRSMYdtC9RsbUrdb7xQ-z_yDFr0q0kS1wAAAAHi9E9wAA")
 
-# Logları Kapat
+# Logları Kapat (Hız için)
 logging.basicConfig(level=logging.ERROR)
 
-bot = Client("yael_render", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True)
-ub = Client("yael_user", api_id=API_ID, api_hash=API_HASH, session_string=SESSION, in_memory=True)
+# İstemciler
+bot = Client("render_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True)
+ub = Client("render_user", api_id=API_ID, api_hash=API_HASH, session_string=SESSION, in_memory=True)
 
 # Küresel Sohbet Hafızası
 CHAT_DB = {}
 
-# ==================== 1. PRE-LOADER (ERİŞİM GARANTİSİ) ====================
+# ==================== 1. WEB SERVER (7/24 KEEP ALIVE) ====================
+app = Flask(__name__)
+
+@app.route('/')
+def home(): return "Bot Çalışıyor! ⚡"
+
+def run_web():
+    # Render PORT'u otomatik atar, yoksa 8080 kullanır
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
+
+def keep_alive():
+    t = Thread(target=run_web)
+    t.daemon = True
+    t.start()
+
+# ==================== 2. PRE-LOADER (ERİŞİM GARANTİSİ) ====================
 async def load_all_chats():
     print("⏳ [SİSTEM] Erişim anahtarları güncelleniyor...")
     try:
         async for dialog in ub.get_dialogs():
             CHAT_DB[dialog.chat.id] = dialog.chat
     except: pass
-    print(f"✅ [HAZIR] {len(CHAT_DB)} kanal hafızada. Kısıtlama delmeye hazır!")
+    print(f"✅ [HAZIR] {len(CHAT_DB)} kanal hafızada.")
 
-# ==================== 2. LİNK ÇÖZÜCÜ ====================
+# ==================== 3. LİNK ÇÖZÜCÜ ====================
 def parse_link(link):
     data = {"chat_id": None, "msg_id": 1, "topic_id": None}
     link = str(link).strip()
@@ -49,7 +69,7 @@ def parse_link(link):
     except: pass
     return data
 
-# ==================== 3. TRANSFER KOMUTU (BYPASS MODU) ====================
+# ==================== 4. TRANSFER (BYPASS MODU) ====================
 @bot.on_message(filters.command("transfer"))
 async def transfer(c, m):
     try: src_l, dst_l = m.command[1], m.command[2]
@@ -58,7 +78,7 @@ async def transfer(c, m):
     status = await m.reply("🔄 **Userbot Bağlanıyor...**")
     src, dst = parse_link(src_l), parse_link(dst_l)
 
-    # KAYNAK KANALI BULMA (DB KULLANARAK)
+    # KAYNAK KANALI BULMA
     source_chat = None
     if isinstance(src["chat_id"], int):
         if src["chat_id"] in CHAT_DB: source_chat = CHAT_DB[src["chat_id"]]
@@ -69,17 +89,19 @@ async def transfer(c, m):
 
     # SON MESAJI BUL
     last_id = 0
-    async for x in ub.get_chat_history(source_chat.id, limit=1): last_id = x.id
+    try:
+        async for x in ub.get_chat_history(source_chat.id, limit=1): last_id = x.id
+    except: pass
     
     if last_id == 0: await status.edit("❌ Kanal boş."); return
 
     start = src["msg_id"] if src["msg_id"] > 1 else 1
-    await status.edit(f"🚀 **BYPASS MODU AKTİF**\n`{source_chat.title}` kopyalanıyor...\nDiski korumak için 'İndir-Sil' yapılacak.")
+    await status.edit(f"🚀 **Render Modu Aktif**\n`{source_chat.title}` kopyalanıyor...\nDiski korumak için 'İndir-Sil' yapılacak.")
 
     success = 0
-    # 50'şer 50'şer işle (Render RAM'ini yormamak için düşük tuttum)
-    for i in range(start, last_id + 1, 50):
-        end = min(i + 49, last_id)
+    # 20'şer 20'şer işle (Render RAM'ini patlatmamak için ideal sayı)
+    for i in range(start, last_id + 1, 20):
+        end = min(i + 19, last_id)
         ids = list(range(i, end + 1))
         
         try:
@@ -93,38 +115,30 @@ async def transfer(c, m):
                 kwrgs = {}
                 if dst["topic_id"]: kwrgs["message_thread_id"] = dst["topic_id"]
 
-                # --- KRİTİK BÖLÜM: BYPASS MANTIĞI ---
                 try:
-                    # 1. Önce normal kopyalamayı dene (Hızlıdır, kısıtlama yoksa çalışır)
+                    # 1. Önce normal kopyalamayı dene (Hızlıdır)
                     await msg.copy(dst["chat_id"], **kwrgs)
                 except:
-                    # 2. Hata verirse (Protected Content), İNDİR-YÜKLE yap
+                    # 2. Hata verirse (Kısıtlı İçerik), İNDİR-YÜKLE yap
                     try:
-                        # Dosya yolu belirle (Render'ın geçici klasörü)
+                        # Dosya yolu (Render geçici disk)
                         path = await ub.download_media(msg)
                         
-                        # Caption
-                        cap = msg.caption or ""
-                        
-                        # Yükle
-                        if msg.video: await ub.send_video(dst["chat_id"], path, caption=cap, **kwrgs)
-                        elif msg.photo: await ub.send_photo(dst["chat_id"], path, caption=cap, **kwrgs)
-                        elif msg.document: await ub.send_document(dst["chat_id"], path, caption=cap, **kwrgs)
+                        if msg.video: await ub.send_video(dst["chat_id"], path, caption=msg.caption, **kwrgs)
+                        elif msg.photo: await ub.send_photo(dst["chat_id"], path, caption=msg.caption, **kwrgs)
+                        elif msg.document: await ub.send_document(dst["chat_id"], path, caption=msg.caption, **kwrgs)
                         elif msg.text: await ub.send_message(dst["chat_id"], msg.text, **kwrgs)
                         
                         # HEMAN SİL (Render Diskini Koru)
                         if os.path.exists(path): os.remove(path)
-                    except Exception as e:
-                        print(f"Hata: {e}")
-                        pass # Geç, takılma
+                    except: pass
                 
                 success += 1
                 
             await status.edit(f"✅ İlerleme: {end}/{last_id} (Başarılı: {success})")
-            await asyncio.sleep(2) 
             
         except FloodWait as fw:
-            await status.edit(f"😴 {fw.value}sn Mola..."); await asyncio.sleep(fw.value + 5)
+            await asyncio.sleep(fw.value + 5)
         except Exception: pass
 
     await status.edit(f"🏁 **BİTTİ:** {success} içerik taşındı.")
@@ -138,7 +152,8 @@ async def katil(c, m):
 
 # ==================== MAIN ====================
 if __name__ == "__main__":
-    print("🚀 BOT BAŞLATILIYOR...")
+    print("🚀 RENDER BOT BAŞLATILIYOR...")
+    keep_alive() # Flask sunucusunu başlat
     ub.start()
     bot.start()
     
