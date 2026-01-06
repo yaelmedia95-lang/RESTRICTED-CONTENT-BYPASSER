@@ -16,7 +16,7 @@ from flask import Flask
 # --- 1. RENDER WEB SUNUCUSU ---
 app = Flask(__name__)
 @app.route('/')
-def home(): return "YaelSaver No-Caption Active!"
+def home(): return "YaelSaver Auto-Full Active!"
 def run_web(): app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
 # --- 2. AYARLAR ---
@@ -25,17 +25,16 @@ API_HASH = os.environ.get("API_HASH", "")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 SESSION_STRING = os.environ.get("SESSION_STRING", "") 
 
-# !!! BURAYA KENDİ ID'Nİ YAZ !!!
+# SENİN ID'N (Bunu düzeltmeyi unutma)
 ADMINS = [8291313483] 
 
-# MARKALAMA METNİ
 WATERMARK_TEXT = "TG:StreetagencyTR"
 
 # --- 3. İSTEMCİLER ---
 bot = TelegramClient('bot_sess', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 userbot = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
-# --- 4. MARKALAMA MOTORU ---
+# --- 4. MARKALAMA (AYNI) ---
 def check_font():
     if not os.path.exists("font.ttf"):
         try:
@@ -55,50 +54,43 @@ def add_watermark(input_path):
                 w_percent = (base_width / float(img.width))
                 h_size = int((float(img.height) * float(w_percent)))
                 img = img.resize((base_width, h_size), Image.Resampling.LANCZOS)
-            
             txt_layer = Image.new('RGBA', img.size, (255, 255, 255, 0))
             draw = ImageDraw.Draw(txt_layer)
             fontsize = int(img.width * 0.08)
             try: font = ImageFont.truetype("font.ttf", fontsize)
             except: font = ImageFont.load_default()
-            
             bbox = draw.textbbox((0, 0), WATERMARK_TEXT, font=font)
             text_w = bbox[2] - bbox[0]
             x, y = (img.width - text_w) / 2, 30
-            
             draw.text((x, y), WATERMARK_TEXT, font=font, fill="white", stroke_width=3, stroke_fill="black")
             out = Image.alpha_composite(img, txt_layer).convert("RGB")
             out.save(output_path, quality=95)
             return output_path
-
         elif input_path.lower().endswith(('.mp4', '.mkv', '.mov', '.avi')):
-            # FFmpeg Kontrolü
             try: subprocess.run(['ffmpeg', '-version'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except: return input_path # FFmpeg yoksa orjinal dön
-            
-            cmd = [
-                'ffmpeg', '-y', '-i', input_path,
-                '-vf', f"drawtext=fontfile=font.ttf:text='{WATERMARK_TEXT}':fontcolor=white:fontsize=h/15:x=(w-text_w)/2:y=30:shadowcolor=black:shadowx=3:shadowy=3",
-                '-codec:a', 'copy', '-preset', 'ultrafast', output_path
-            ]
+            except: return input_path
+            cmd = ['ffmpeg', '-y', '-i', input_path, '-vf', f"drawtext=fontfile=font.ttf:text='{WATERMARK_TEXT}':fontcolor=white:fontsize=h/15:x=(w-text_w)/2:y=30:shadowcolor=black:shadowx=3:shadowy=3", '-codec:a', 'copy', '-preset', 'ultrafast', output_path]
             subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
             return output_path
     except: return input_path
     return input_path
 
-# --- 5. YARDIMCI ---
+# --- 5. YENİ LİNK ÇÖZÜCÜ (SAYISIZ LİNK DESTEĞİ) ---
 def parse_link(link):
-    data = {"peer": None, "msg_id": 1}
+    data = {"peer": None, "msg_id": 1} # Varsayılan 1 (En baş)
     link = link.strip()
     try:
         if "t.me/c/" in link: 
             parts = link.split("t.me/c/")[1].split("?")[0].split("/")
             data["peer"] = int("-100" + parts[0])
-            if len(parts) >= 2 and parts[-1].isdigit(): data["msg_id"] = int(parts[-1])
+            # Eğer linkin sonunda sayı varsa al, yoksa 1 kalsın
+            if len(parts) >= 2 and parts[-1].isdigit(): 
+                data["msg_id"] = int(parts[-1])
         elif "t.me/" in link: 
             parts = link.split("t.me/")[1].split("?")[0].split("/")
             data["peer"] = parts[0]
-            if len(parts) >= 2 and parts[-1].isdigit(): data["msg_id"] = int(parts[-1])
+            if len(parts) >= 2 and parts[-1].isdigit(): 
+                data["msg_id"] = int(parts[-1])
     except: pass
     return data
 
@@ -114,9 +106,9 @@ async def progress_callback(current, total, event, last_update_time):
 
 @bot.on(events.NewMessage(pattern='/start'))
 async def start(event):
-    await event.respond(f"👋 **YaelSaver No-Caption**\n\nMarka basar, yazıyı siler atar.\nKomut: `/medya`")
+    await event.respond(f"👋 **YaelSaver Full-Auto**\n\nLinkin sonuna sayı yazmazsan en baştan başlar.")
 
-# KATILMA KOMUTU
+# KATIL
 @bot.on(events.NewMessage(pattern='/katil'))
 async def join_channel(event):
     if event.sender_id not in ADMINS: return
@@ -127,27 +119,29 @@ async def join_channel(event):
         await event.respond("✅ Girdim.")
     except Exception as e: await event.respond(f"❌ Hata: {e}")
 
-# ASIL KOMUT: MEDYA TRANSFER (YAZISIZ)
+# MEDYA TRANSFER (OTOMATİK BAŞLANGIÇLI)
 @bot.on(events.NewMessage(pattern='/medya'))
 async def media_transfer(event):
     if event.sender_id not in ADMINS: return await event.respond("🔒 Yetkisiz.")
     try: args = event.text.split(); src_l, dst_l = args[1], args[2]
     except: return await event.respond("⚠️ `/medya [Kaynak] [Hedef]`")
 
-    status = await event.respond("♻️ **Analiz... (Sadece Medya, Yazısız)**")
+    status = await event.respond("♻️ **Kanal Taranıyor... (En Baştan)**")
     src = parse_link(src_l); dst = parse_link(dst_l)
     
+    # Eğer kullanıcı sayı belirtmediyse parse_link otomatik 1 döndürür.
+    start_id = src["msg_id"]
+
     try:
         input_ch = await userbot.get_input_entity(src["peer"])
         output_ch = await userbot.get_input_entity(dst["peer"])
         count = 0
         skipped = 0
         
-        # iter_messages: Eskiden Yeniye Doğru
-        async for msg in userbot.iter_messages(input_ch, min_id=(src["msg_id"]-1), reverse=True):
+        # 1. Mesajdan (veya belirtilenden) başla, Sona kadar git
+        async for msg in userbot.iter_messages(input_ch, min_id=(start_id-1), reverse=True):
             if isinstance(msg, MessageService): continue
             
-            # Sadece MEDYA olanları al (Yazıları atla)
             if not msg.media: 
                 skipped += 1; continue
             
@@ -168,12 +162,9 @@ async def media_transfer(event):
                 if dl_msg: await dl_msg.edit("⚙️ **Marka Basılıyor...**")
                 new_path = await asyncio.to_thread(add_watermark, path)
 
-                # Yükle (CAPTION YOK - "" BOŞ GÖNDERİLİYOR)
+                # Yükle (YAZISIZ)
                 if dl_msg: await dl_msg.edit("⬆️ **Yükleniyor...**")
-                
-                # --- İŞTE BURASI DEĞİŞTİ ---
                 await userbot.send_file(output_ch, new_path, caption="") 
-                # ---------------------------
 
                 if os.path.exists(path): os.remove(path)
                 if os.path.exists(new_path) and new_path != path: os.remove(new_path)
@@ -190,27 +181,10 @@ async def media_transfer(event):
         await status.edit(f"✅ **BİTTİ!**\n📸 Toplam: {count}")
     except Exception as e: await status.edit(f"❌ Hata: {str(e)}")
 
-# TEKLİ İNDİRME (YAZISIZ)
-@bot.on(events.NewMessage(pattern='/tekli'))
-async def single(event):
-    try: link = event.text.split()[1]
-    except: return await event.respond("Link?")
-    inf = parse_link(link)
-    msg = await event.respond("⬇️ İndiriliyor...")
-    try:
-        m = await userbot.get_messages(inf["peer"], ids=inf["msg_id"])
-        path = await userbot.download_media(m)
-        new_path = await asyncio.to_thread(add_watermark, path)
-        await bot.send_file(event.chat_id, new_path, caption="") # Yazısız
-        os.remove(path); 
-        if new_path != path: os.remove(new_path)
-        await msg.delete()
-    except Exception as e: await msg.edit(f"Hata: {e}")
-
 # MAIN
 def main():
     threading.Thread(target=run_web).start()
-    print("🚀 YaelSaver No-Caption Started!")
+    print("🚀 Auto-Start Ready!")
     userbot.start()
     bot.run_until_disconnected()
 
