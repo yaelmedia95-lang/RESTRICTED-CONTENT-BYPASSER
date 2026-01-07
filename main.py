@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 @app.route('/')
 def home():
-    return "Bot Aktif! Kanal Tarama Modu Açık."
+    return "Bot Aktif! Reverse Hatası Giderildi."
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -69,26 +69,16 @@ def linki_coz(link):
     return chat_identifier, msg_id
 
 async def get_chat_guvenli(chat_id):
-    """
-    Bu fonksiyon PeerIdInvalid hatasını çözmek için dialogları tarar.
-    """
+    """PeerIdInvalid hatasını çözmek için dialogları tarar."""
     try:
-        # Önce direkt dene
-        chat = await userbot.get_chat(chat_id)
-        return chat
+        return await userbot.get_chat(chat_id)
     except (PeerIdInvalid, ChannelInvalid):
         logger.warning(f"⚠️ Kanal ({chat_id}) direkt bulunamadı, liste taranıyor...")
-        
-        # Bulamazsa senin tüm sohbetlerini tarayıp ID eşleştirmeye çalışır
         async for dialog in userbot.get_dialogs():
             if dialog.chat.id == chat_id:
                 return dialog.chat
-            
-            # Eğer kullanıcı adı varsa ve eşleşiyorsa
             if isinstance(chat_id, str) and dialog.chat.username and dialog.chat.username.lower() == chat_id.lower():
                 return dialog.chat
-                
-        # Hala bulunamadıysa patlar
         raise ValueError("Kanal bulunamadı! Userbot bu kanala üye mi?")
 
 # =========================================================
@@ -98,9 +88,9 @@ async def get_chat_guvenli(chat_id):
 @bot.on_message(filters.command("start"))
 async def start_msg(client, message):
     await message.reply(
-        "🛠 **Gelişmiş Medya Transfer Botu**\n\n"
-        "Userbot tüm kanallarını taradı ve hafızaya aldı.\n"
-        "Artık `PeerIdInvalid` hatası almamalısın.\n\n"
+        "✅ **Bot Düzeldi!**\n\n"
+        "`reverse` hatası giderildi.\n"
+        "Userbot tüm kanallarını tanıdı.\n\n"
         "▶️ `/transfer KAYNAK HEDEF`\n"
         "▶️ `/tekli LINK`"
     )
@@ -124,41 +114,43 @@ async def transfer_baslat(client, message):
         await message.reply("❌ **Kullanım:** `/transfer https://t.me/c/kaynak/10 https://t.me/hedef`")
         return
 
-    durum = await message.reply("🔄 **Kanallar aranıyor (Geniş Tarama)...**")
+    durum = await message.reply("🔄 **Kanallar taranıyor...**")
 
     try:
         src_id, src_msg_id = linki_coz(link_kaynak)
         dst_id, _ = linki_coz(link_hedef)
 
-        # GÜVENLİ GET CHAT (HATA ÇÖZÜCÜ)
+        # GÜVENLİ GET CHAT
         try:
             src_chat = await get_chat_guvenli(src_id)
             dst_chat = await get_chat_guvenli(dst_id)
         except Exception as e:
-            await durum.edit(f"❌ **Kanal Bulunamadı!**\n\nUserbot hesabınla o kanala girip son mesaja bakman gerekebilir.\n**Hata:** {e}")
+            await durum.edit(f"❌ **Kanal Hatası:** {e}\nUserbot o kanalda mı?")
             return
-
-        baslangic = f"Mesaj {src_msg_id}'den itibaren" if src_msg_id else "En Baştan"
         
         await durum.edit(
             f"🚀 **Transfer Başlıyor!**\n\n"
             f"📤 **Kaynak:** {src_chat.title}\n"
             f"📥 **Hedef:** {dst_chat.title}\n"
-            f"📍 **Mod:** {baslangic}\n"
-            f"📂 **İçerik:** Sadece Video/Foto"
+            f"⚠️ **Yön:** En Yeniden -> En Eskiye Doğru"
         )
 
         sayac = 0
         
-        # Mesajları Çekme
-        async for msg in userbot.get_chat_history(src_chat.id, reverse=True):
+        # DÜZELTME: reverse=True kaldırıldı.
+        # get_chat_history varsayılan olarak Yeni -> Eski çalışır.
+        async for msg in userbot.get_chat_history(src_chat.id):
             if DURDUR:
                 await bot.send_message(message.chat.id, "🛑 Durduruldu.")
                 break
 
-            # Başlangıç mesajından öncesini atla
-            if src_msg_id and msg.id < src_msg_id:
-                continue
+            # Eğer kullanıcı bir başlangıç mesajı verdiyse (Örn: 1500)
+            # Biz sondan (örn 2000'den) geliyoruz. 1500'e gelince durmalıyız veya öncesini almamalıyız.
+            if src_msg_id:
+                # Eğer okuduğumuz mesaj, başlangıçtan eskiyse işlemi bitirebiliriz (veya atlarız)
+                if msg.id < src_msg_id:
+                    # Daha eskiye gitmeye gerek yok, çünkü oradan başlamak istedik.
+                    break 
 
             # Sadece Medya
             if msg.photo or msg.video:
@@ -235,25 +227,21 @@ async def tekli_indir(client, message):
         await msj.edit(f"❌ Hata: {e}")
 
 # =========================================================
-#                 BAŞLATMA (HAYAT KURTARAN KISIM)
+#                 BAŞLATMA
 # =========================================================
 async def main():
     logger.info("Botlar Başlatılıyor...")
     await bot.start()
     await userbot.start()
     
-    logger.info("♻️ KANALLAR TARANIYOR (BU BİRAZ SÜREBİLİR)...")
-    logger.info("Bu işlem 'PeerIdInvalid' hatasını önlemek içindir.")
-    
-    sayac = 0
-    # Userbot'un tüm sohbetlerini çekiyoruz ki AccessHash'leri hafızaya alsın.
+    logger.info("♻️ Kanal Listesi Güncelleniyor...")
     try:
+        # Tüm sohbetleri çekip hafızaya atıyoruz (PeerIdInvalid Önlemi)
         async for dialog in userbot.get_dialogs():
-            sayac += 1
-            # Sadece çekmek yetiyor, Pyrogram otomatik cachler.
-        logger.info(f"✅ {sayac} adet sohbet hafızaya alındı!")
+            pass 
+        logger.info("✅ Liste güncellendi!")
     except Exception as e:
-        logger.error(f"Tarama sırasında hata (önemsiz olabilir): {e}")
+        logger.error(f"Liste güncelleme hatası: {e}")
 
     logger.info("🚀 SİSTEM HAZIR!")
     await idle()
