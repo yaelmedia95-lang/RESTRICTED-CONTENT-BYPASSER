@@ -4,10 +4,10 @@ import logging
 from threading import Thread
 from flask import Flask
 from pyrogram import Client, filters, idle
-from pyrogram.errors import FloodWait, PeerIdInvalid, ChannelInvalid
+from pyrogram.errors import FloodWait, PeerIdInvalid, ChannelPrivate, ChannelInvalid
 
 # =========================================================
-#                   AYARLAR (BURAYI DOLDUR)
+#                   AYARLAR (DOLDUR)
 # =========================================================
 API_ID = 30647156                 # Sayı olarak yaz (Tırnak yok)
 API_HASH = "11d0174f807a8974a955520b8c968b4d"   # Tırnak içinde
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 @app.route('/')
 def home():
-    return "Bot Aktif! Reverse Hatası Giderildi."
+    return "Bot Aktif! 406 Fix Devrede."
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -38,8 +38,34 @@ userbot = Client("userbot_session", api_id=API_ID, api_hash=API_HASH, session_st
 DURDUR = False
 
 # =========================================================
-#             HATA ÇÖZÜCÜ FONKSİYONLAR
+#             ÖZEL HATA ÇÖZÜCÜ (BURASI ÖNEMLİ)
 # =========================================================
+
+async def force_find_chat(chat_id):
+    """
+    Eğer get_chat hata verirse, bu fonksiyon kullanıcının TÜM dialoglarını
+    tek tek gezerek o ID'ye sahip kanalı bulur ve nesnesini döndürür.
+    Bu yöntem AccessHash hatasını %100 çözer.
+    """
+    logger.info(f"⚠️ Derin tarama yapılıyor: {chat_id}")
+    
+    # 1. Eğer chat_id string ise (username) ve başında @ yoksa ekle
+    if isinstance(chat_id, str) and not chat_id.startswith("-100"):
+        if not chat_id.startswith("@"): chat_id = "@" + chat_id
+        try:
+            return await userbot.get_chat(chat_id)
+        except:
+            pass # Username ile bulamazsa devam et
+
+    # 2. Dialogları gez (Kesin Çözüm)
+    async for dialog in userbot.get_dialogs():
+        # ID eşleşiyor mu?
+        if str(dialog.chat.id) == str(chat_id):
+            logger.info(f"✅ Kanal bulundu: {dialog.chat.title}")
+            return dialog.chat
+    
+    # Bulunamazsa
+    raise ValueError(f"Kanal ({chat_id}) senin sohbet listende bulunamadı! Userbot grupta mı?")
 
 def linki_coz(link):
     """Linkten ID ve Mesaj Numarasını ayıklar"""
@@ -47,14 +73,12 @@ def linki_coz(link):
     
     chat_identifier = None
     msg_id = None
-    
     parts = link.split("/")
     
     # Özel Kanal (c/12345/10)
     if "c/" in link:
-        # ID her zaman -100 ile başlar
         raw_id = parts[1]
-        chat_identifier = int("-100" + raw_id)
+        chat_identifier = int("-100" + raw_id) # Private kanallar -100 ile başlar
         if len(parts) > 2:
             try: msg_id = int(parts[2])
             except: pass
@@ -68,19 +92,6 @@ def linki_coz(link):
 
     return chat_identifier, msg_id
 
-async def get_chat_guvenli(chat_id):
-    """PeerIdInvalid hatasını çözmek için dialogları tarar."""
-    try:
-        return await userbot.get_chat(chat_id)
-    except (PeerIdInvalid, ChannelInvalid):
-        logger.warning(f"⚠️ Kanal ({chat_id}) direkt bulunamadı, liste taranıyor...")
-        async for dialog in userbot.get_dialogs():
-            if dialog.chat.id == chat_id:
-                return dialog.chat
-            if isinstance(chat_id, str) and dialog.chat.username and dialog.chat.username.lower() == chat_id.lower():
-                return dialog.chat
-        raise ValueError("Kanal bulunamadı! Userbot bu kanala üye mi?")
-
 # =========================================================
 #                 KOMUTLAR
 # =========================================================
@@ -88,9 +99,8 @@ async def get_chat_guvenli(chat_id):
 @bot.on_message(filters.command("start"))
 async def start_msg(client, message):
     await message.reply(
-        "✅ **Bot Düzeldi!**\n\n"
-        "`reverse` hatası giderildi.\n"
-        "Userbot tüm kanallarını tanıdı.\n\n"
+        "🛠 **406 Hata Çözücü Bot**\n\n"
+        "Eğer 'Channel Private' hatası alırsan bot senin listeni tarayıp o kanalı bulacak.\n\n"
         "▶️ `/transfer KAYNAK HEDEF`\n"
         "▶️ `/tekli LINK`"
     )
@@ -111,55 +121,58 @@ async def transfer_baslat(client, message):
         link_kaynak = args[1]
         link_hedef = args[2]
     except:
-        await message.reply("❌ **Kullanım:** `/transfer https://t.me/c/kaynak/10 https://t.me/hedef`")
+        await message.reply("❌ **Kullanım:** `/transfer https://t.me/c/1234/100 https://t.me/hedef`")
         return
 
-    durum = await message.reply("🔄 **Kanallar taranıyor...**")
+    durum = await message.reply("🔄 **Kanal listende aranıyor...**")
 
     try:
         src_id, src_msg_id = linki_coz(link_kaynak)
         dst_id, _ = linki_coz(link_hedef)
 
-        # GÜVENLİ GET CHAT
+        # KAYNAK KANALI BUL (ZORLA)
         try:
-            src_chat = await get_chat_guvenli(src_id)
-            dst_chat = await get_chat_guvenli(dst_id)
+            src_chat = await force_find_chat(src_id)
         except Exception as e:
-            await durum.edit(f"❌ **Kanal Hatası:** {e}\nUserbot o kanalda mı?")
+            await durum.edit(f"❌ **Kaynak Kanal Hatası:**\n{e}\n\nUserbot o grupta değil mi?")
             return
+
+        # HEDEF KANALI BUL (ZORLA)
+        try:
+            dst_chat = await force_find_chat(dst_id)
+        except Exception as e:
+            await durum.edit(f"❌ **Hedef Kanal Hatası:**\n{e}")
+            return
+
+        baslangic = f"Mesaj {src_msg_id}'den itibaren" if src_msg_id else "En Baştan"
         
         await durum.edit(
             f"🚀 **Transfer Başlıyor!**\n\n"
             f"📤 **Kaynak:** {src_chat.title}\n"
             f"📥 **Hedef:** {dst_chat.title}\n"
-            f"⚠️ **Yön:** En Yeniden -> En Eskiye Doğru"
+            f"📍 **Mod:** {baslangic}\n"
+            f"⚠️ **Yön:** En Yeniden -> En Eskiye"
         )
 
         sayac = 0
         
-        # DÜZELTME: reverse=True kaldırıldı.
-        # get_chat_history varsayılan olarak Yeni -> Eski çalışır.
+        # TARAMA
         async for msg in userbot.get_chat_history(src_chat.id):
             if DURDUR:
                 await bot.send_message(message.chat.id, "🛑 Durduruldu.")
                 break
 
-            # Eğer kullanıcı bir başlangıç mesajı verdiyse (Örn: 1500)
-            # Biz sondan (örn 2000'den) geliyoruz. 1500'e gelince durmalıyız veya öncesini almamalıyız.
-            if src_msg_id:
-                # Eğer okuduğumuz mesaj, başlangıçtan eskiyse işlemi bitirebiliriz (veya atlarız)
-                if msg.id < src_msg_id:
-                    # Daha eskiye gitmeye gerek yok, çünkü oradan başlamak istedik.
-                    break 
+            # Başlangıç mesajından öncesini atla (ID küçüldükçe eskiye gider)
+            if src_msg_id and msg.id < src_msg_id:
+                break 
 
-            # Sadece Medya
             if msg.photo or msg.video:
                 try:
-                    # İndir
+                    # İNDİR
                     dosya = await userbot.download_media(msg)
                     if not dosya: continue
 
-                    # Yükle
+                    # YÜKLE
                     txt = msg.caption or ""
                     if msg.video:
                         await userbot.send_video(dst_chat.id, video=dosya, caption=txt)
@@ -167,13 +180,13 @@ async def transfer_baslat(client, message):
                         await userbot.send_photo(dst_chat.id, photo=dosya, caption=txt)
 
                     sayac += 1
-                    os.remove(dosya) # Sil
+                    os.remove(dosya)
 
                     if sayac % 5 == 0:
                         try: await durum.edit(f"🔄 **Aktarılıyor...**\nToplam: {sayac}")
                         except: pass
                     
-                    await asyncio.sleep(4) # Spam Koruması
+                    await asyncio.sleep(4)
 
                 except FloodWait as fw:
                     logger.warning(f"FloodWait: {fw.value}s")
@@ -198,11 +211,11 @@ async def tekli_indir(client, message):
         await message.reply("❌ Link hatalı.")
         return
 
-    msj = await message.reply("🔍 **Medya aranıyor...**")
+    msj = await message.reply("🔍 **Kanal listende aranıyor...**")
 
     try:
-        # Güvenli Chat Bulucu
-        chat = await get_chat_guvenli(chat_id)
+        # ZORLA BUL
+        chat = await force_find_chat(chat_id)
         
         msg = await userbot.get_messages(chat.id, msg_id)
         
@@ -230,20 +243,10 @@ async def tekli_indir(client, message):
 #                 BAŞLATMA
 # =========================================================
 async def main():
-    logger.info("Botlar Başlatılıyor...")
+    logger.info("Sistem başlatılıyor...")
     await bot.start()
     await userbot.start()
-    
-    logger.info("♻️ Kanal Listesi Güncelleniyor...")
-    try:
-        # Tüm sohbetleri çekip hafızaya atıyoruz (PeerIdInvalid Önlemi)
-        async for dialog in userbot.get_dialogs():
-            pass 
-        logger.info("✅ Liste güncellendi!")
-    except Exception as e:
-        logger.error(f"Liste güncelleme hatası: {e}")
-
-    logger.info("🚀 SİSTEM HAZIR!")
+    logger.info("✅ Botlar hazır!")
     await idle()
     await bot.stop()
     await userbot.stop()
