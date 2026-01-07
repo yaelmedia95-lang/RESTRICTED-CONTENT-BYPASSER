@@ -23,14 +23,14 @@ logger = logging.getLogger(__name__)
 
 @app.route('/')
 def home():
-    return "Bot Aktif! PeerIdInvalid Fixlendi."
+    return "Bot Aktif! Kanal Tarama Modu Açık."
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
 
 # =========================================================
-#                 BOT KURULUMU
+#                 BOTLAR
 # =========================================================
 bot = Client("bot_session", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True)
 userbot = Client("userbot_session", api_id=API_ID, api_hash=API_HASH, session_string=SESSION_STRING, in_memory=True)
@@ -38,40 +38,58 @@ userbot = Client("userbot_session", api_id=API_ID, api_hash=API_HASH, session_st
 DURDUR = False
 
 # =========================================================
-#             AKILLI LINK ÇÖZÜCÜ (FIX)
+#             HATA ÇÖZÜCÜ FONKSİYONLAR
 # =========================================================
+
 def linki_coz(link):
-    """
-    Her türlü Telegram linkini doğru ID veya Username formatına çevirir.
-    """
-    link = link.strip()
-    link = link.replace("https://", "").replace("http://", "").replace("t.me/", "")
+    """Linkten ID ve Mesaj Numarasını ayıklar"""
+    link = link.strip().replace("https://", "").replace("http://", "").replace("t.me/", "")
     
     chat_identifier = None
     msg_id = None
     
     parts = link.split("/")
     
-    # 1. Private Kanal Linki (c/123456789/100)
+    # Özel Kanal (c/12345/10)
     if "c/" in link:
-        # t.me/c/1234567890/100
-        # Pyrogram için ID: -1001234567890 olmalı
+        # ID her zaman -100 ile başlar
         raw_id = parts[1]
         chat_identifier = int("-100" + raw_id)
         if len(parts) > 2:
-            msg_id = int(parts[2])
-
-    # 2. Public Kanal Linki (username/100)
+            try: msg_id = int(parts[2])
+            except: pass
+            
+    # Genel Kanal (kanaladi/10)
     else:
-        # t.me/kanaladi/100
-        chat_identifier = parts[0] # Username string olarak kalmalı
+        chat_identifier = parts[0]
         if len(parts) > 1:
-            try:
-                msg_id = int(parts[1])
-            except:
-                pass
+            try: msg_id = int(parts[1])
+            except: pass
 
     return chat_identifier, msg_id
+
+async def get_chat_guvenli(chat_id):
+    """
+    Bu fonksiyon PeerIdInvalid hatasını çözmek için dialogları tarar.
+    """
+    try:
+        # Önce direkt dene
+        chat = await userbot.get_chat(chat_id)
+        return chat
+    except (PeerIdInvalid, ChannelInvalid):
+        logger.warning(f"⚠️ Kanal ({chat_id}) direkt bulunamadı, liste taranıyor...")
+        
+        # Bulamazsa senin tüm sohbetlerini tarayıp ID eşleştirmeye çalışır
+        async for dialog in userbot.get_dialogs():
+            if dialog.chat.id == chat_id:
+                return dialog.chat
+            
+            # Eğer kullanıcı adı varsa ve eşleşiyorsa
+            if isinstance(chat_id, str) and dialog.chat.username and dialog.chat.username.lower() == chat_id.lower():
+                return dialog.chat
+                
+        # Hala bulunamadıysa patlar
+        raise ValueError("Kanal bulunamadı! Userbot bu kanala üye mi?")
 
 # =========================================================
 #                 KOMUTLAR
@@ -80,87 +98,19 @@ def linki_coz(link):
 @bot.on_message(filters.command("start"))
 async def start_msg(client, message):
     await message.reply(
-        "👋 **Medya Transfer Botu (v2.0 Fix)**\n\n"
-        "✅ `PeerIdInvalid` Koruması Aktif\n"
-        "✅ İletim Kısıtlı İçerik İndirici Aktif\n\n"
-        "**Komutlar:**\n"
-        "1️⃣ `/tekli https://t.me/c/123456/100` (Tek mesaj)\n"
-        "2️⃣ `/transfer https://t.me/c/kaynak https://t.me/hedef`"
+        "🛠 **Gelişmiş Medya Transfer Botu**\n\n"
+        "Userbot tüm kanallarını taradı ve hafızaya aldı.\n"
+        "Artık `PeerIdInvalid` hatası almamalısın.\n\n"
+        "▶️ `/transfer KAYNAK HEDEF`\n"
+        "▶️ `/tekli LINK`"
     )
 
 @bot.on_message(filters.command("iptal"))
 async def iptal_et(client, message):
     global DURDUR
     DURDUR = True
-    await message.reply("🛑 İşlem iptal edildi.")
+    await message.reply("🛑 İşlem durduruluyor...")
 
-# --- TEKLİ İNDİRME ---
-@bot.on_message(filters.command("tekli"))
-async def tekli_indir(client, message):
-    try:
-        link = message.text.split()[1]
-    except:
-        await message.reply("❌ Link girmedin!")
-        return
-
-    bilgi = await message.reply("🔄 **Analiz ediliyor...**")
-    
-    try:
-        chat_id, msg_id = linki_coz(link)
-        
-        if not msg_id:
-            await bilgi.edit("❌ Linkte mesaj numarası yok! (Örn: /1203)")
-            return
-
-        # Önce Chat'i hafızaya al (PeerIdInvalid Önleyici)
-        try:
-            chat_info = await userbot.get_chat(chat_id)
-        except Exception as e:
-            await bilgi.edit(f"❌ Userbot kanalı göremiyor!\nHata: {e}\n\n*Çözüm:* Userbot hesabınla o kanala gir ve bir mesaj yaz veya okundu yap.")
-            return
-
-        # Şimdi mesajı çek
-        msg = await userbot.get_messages(chat_id, msg_id)
-        
-        if not msg or msg.empty:
-            await bilgi.edit("❌ Mesaj bulunamadı veya silinmiş.")
-            return
-
-        if not (msg.photo or msg.video):
-            await bilgi.edit("❌ Bu mesajda medya yok.")
-            return
-
-        await bilgi.edit("📥 **İndiriliyor (Kısıtlı içerik modu)...**")
-        
-        # İndir
-        dosya = await userbot.download_media(msg)
-        
-        await bilgi.edit("📤 **Sana gönderiliyor...**")
-        
-        # Gönder (Userbot değil BOT gönderiyor ki temiz olsun)
-        # Eğer dosya çok büyükse Userbot ile göndermek daha güvenli olabilir
-        try:
-            if msg.video:
-                await bot.send_video(message.chat.id, video=dosya, caption=msg.caption)
-            elif msg.photo:
-                await bot.send_photo(message.chat.id, photo=dosya, caption=msg.caption)
-        except:
-            # Bot atamazsa Userbot atsın (Yedek)
-            if msg.video:
-                await userbot.send_video(message.chat.id, video=dosya, caption=msg.caption)
-            elif msg.photo:
-                await userbot.send_photo(message.chat.id, photo=dosya, caption=msg.caption)
-
-        # Sil
-        os.remove(dosya)
-        await bilgi.delete()
-
-    except Exception as e:
-        await bilgi.edit(f"❌ Hata: {e}")
-        if 'dosya' in locals() and os.path.exists(dosya):
-            os.remove(dosya)
-
-# --- TOPLU TRANSFER ---
 @bot.on_message(filters.command("transfer"))
 async def transfer_baslat(client, message):
     global DURDUR
@@ -171,40 +121,46 @@ async def transfer_baslat(client, message):
         link_kaynak = args[1]
         link_hedef = args[2]
     except:
-        await message.reply("❌ **Kullanım:** `/transfer kaynak hedef`")
+        await message.reply("❌ **Kullanım:** `/transfer https://t.me/c/kaynak/10 https://t.me/hedef`")
         return
 
-    durum = await message.reply("🔄 **Bağlantılar kontrol ediliyor...**")
+    durum = await message.reply("🔄 **Kanallar aranıyor (Geniş Tarama)...**")
 
     try:
-        src_id, src_msg = linki_coz(link_kaynak)
+        src_id, src_msg_id = linki_coz(link_kaynak)
         dst_id, _ = linki_coz(link_hedef)
 
-        # PeerIdInvalid Fix: Önce Chat objelerini çek
+        # GÜVENLİ GET CHAT (HATA ÇÖZÜCÜ)
         try:
-            src_chat = await userbot.get_chat(src_id)
-            dst_chat = await userbot.get_chat(dst_id)
-        except PeerIdInvalid:
-            await durum.edit("❌ **PeerIdInvalid Hatası!**\nUserbot bu kanalı hafızasında bulamadı. Lütfen Userbot hesabınla o kanala girip bir mesajı görüntüle.")
-            return
+            src_chat = await get_chat_guvenli(src_id)
+            dst_chat = await get_chat_guvenli(dst_id)
         except Exception as e:
-            await durum.edit(f"❌ Kanal hatası: {e}")
+            await durum.edit(f"❌ **Kanal Bulunamadı!**\n\nUserbot hesabınla o kanala girip son mesaja bakman gerekebilir.\n**Hata:** {e}")
             return
 
-        await durum.edit(f"🚀 **Başlıyor...**\nKaynak: {src_chat.title}\nHedef: {dst_chat.title}")
+        baslangic = f"Mesaj {src_msg_id}'den itibaren" if src_msg_id else "En Baştan"
+        
+        await durum.edit(
+            f"🚀 **Transfer Başlıyor!**\n\n"
+            f"📤 **Kaynak:** {src_chat.title}\n"
+            f"📥 **Hedef:** {dst_chat.title}\n"
+            f"📍 **Mod:** {baslangic}\n"
+            f"📂 **İçerik:** Sadece Video/Foto"
+        )
 
         sayac = 0
         
-        # Mesajları tarama
-        async for msg in userbot.get_chat_history(src_id, reverse=True):
+        # Mesajları Çekme
+        async for msg in userbot.get_chat_history(src_chat.id, reverse=True):
             if DURDUR:
                 await bot.send_message(message.chat.id, "🛑 Durduruldu.")
                 break
-            
+
             # Başlangıç mesajından öncesini atla
-            if src_msg and msg.id < src_msg:
+            if src_msg_id and msg.id < src_msg_id:
                 continue
 
+            # Sadece Medya
             if msg.photo or msg.video:
                 try:
                     # İndir
@@ -214,50 +170,92 @@ async def transfer_baslat(client, message):
                     # Yükle
                     txt = msg.caption or ""
                     if msg.video:
-                        await userbot.send_video(dst_id, video=dosya, caption=txt)
+                        await userbot.send_video(dst_chat.id, video=dosya, caption=txt)
                     else:
-                        await userbot.send_photo(dst_id, photo=dosya, caption=txt)
+                        await userbot.send_photo(dst_chat.id, photo=dosya, caption=txt)
 
                     sayac += 1
-                    os.remove(dosya)
+                    os.remove(dosya) # Sil
 
                     if sayac % 5 == 0:
-                        try: await durum.edit(f"🔄 **Taşınıyor:** {sayac} adet")
+                        try: await durum.edit(f"🔄 **Aktarılıyor...**\nToplam: {sayac}")
                         except: pass
                     
-                    await asyncio.sleep(4)
+                    await asyncio.sleep(4) # Spam Koruması
 
                 except FloodWait as fw:
+                    logger.warning(f"FloodWait: {fw.value}s")
                     await asyncio.sleep(fw.value + 5)
                 except Exception as e:
-                    logger.error(f"Transfer hata: {e}")
+                    logger.error(f"Transfer Hatası: {e}")
                     if 'dosya' in locals() and os.path.exists(dosya):
                         os.remove(dosya)
 
-        await bot.send_message(message.chat.id, f"✅ **BİTTİ!**\nToplam {sayac} adet.")
+        await bot.send_message(message.chat.id, f"✅ **İşlem Bitti!** Toplam {sayac} medya.")
 
     except Exception as e:
-        await durum.edit(f"❌ Genel Hata: {e}")
+        await durum.edit(f"❌ Beklenmeyen Hata: {e}")
+
+# --- TEKLİ İNDİRME ---
+@bot.on_message(filters.command("tekli"))
+async def tekli_indir(client, message):
+    try:
+        link = message.text.split()[1]
+        chat_id, msg_id = linki_coz(link)
+    except:
+        await message.reply("❌ Link hatalı.")
+        return
+
+    msj = await message.reply("🔍 **Medya aranıyor...**")
+
+    try:
+        # Güvenli Chat Bulucu
+        chat = await get_chat_guvenli(chat_id)
+        
+        msg = await userbot.get_messages(chat.id, msg_id)
+        
+        if not (msg.photo or msg.video):
+            await msj.edit("❌ Medya yok.")
+            return
+
+        await msj.edit("📥 **İndiriliyor...**")
+        dosya = await userbot.download_media(msg)
+        
+        await msj.edit("📤 **Gönderiliyor...**")
+        
+        if msg.video:
+            await bot.send_video(message.chat.id, video=dosya, caption=msg.caption)
+        else:
+            await bot.send_photo(message.chat.id, photo=dosya, caption=msg.caption)
+            
+        os.remove(dosya)
+        await msj.delete()
+
+    except Exception as e:
+        await msj.edit(f"❌ Hata: {e}")
 
 # =========================================================
-#                 BAŞLATMA (ÖNEMLİ KISIM)
+#                 BAŞLATMA (HAYAT KURTARAN KISIM)
 # =========================================================
 async def main():
-    logger.info("Botlar başlatılıyor...")
+    logger.info("Botlar Başlatılıyor...")
     await bot.start()
     await userbot.start()
     
-    # --- İŞTE ÇÖZÜM BURASI ---
-    logger.info("♻️ Önbellek yenileniyor (PeerIdInvalid Fix)...")
+    logger.info("♻️ KANALLAR TARANIYOR (BU BİRAZ SÜREBİLİR)...")
+    logger.info("Bu işlem 'PeerIdInvalid' hatasını önlemek içindir.")
+    
+    sayac = 0
+    # Userbot'un tüm sohbetlerini çekiyoruz ki AccessHash'leri hafızaya alsın.
     try:
-        # Dialogları çekerek Userbot'un hafızasını tazeliyoruz.
-        # Bu işlem sayesinde bot "ben bu kanalı tanıyorum" der.
-        await userbot.get_dialogs(limit=50) 
-        logger.info("✅ Önbellek yenilendi!")
+        async for dialog in userbot.get_dialogs():
+            sayac += 1
+            # Sadece çekmek yetiyor, Pyrogram otomatik cachler.
+        logger.info(f"✅ {sayac} adet sohbet hafızaya alındı!")
     except Exception as e:
-        logger.warning(f"⚠️ Önbellek yenilenirken hata (önemsiz olabilir): {e}")
+        logger.error(f"Tarama sırasında hata (önemsiz olabilir): {e}")
 
-    logger.info("Sistem Hazır!")
+    logger.info("🚀 SİSTEM HAZIR!")
     await idle()
     await bot.stop()
     await userbot.stop()
