@@ -159,26 +159,14 @@ def parse_telegram_link(link):
     return result if result["chat_id"] else None
 
 # ==================== 5. KOMUTLAR ====================
+# ==================== LOGLU START KOMUTU ====================
 @bot.on_message(filters.command("start") & filters.private)
 async def start_command(client, message):
-    await message.reply(
-        "📸 **Media Transfer Bot**\n\n"
-        "**Özellikler:**\n"
-        "• Sadece video ve fotoğraf transfer eder\n"
-        "• Boyut doğrulama (eksik indirme önlenir)\n"
-        "• Metadata korunur (video süresi vb.)\n\n"
-        "**Komutlar:**\n"
-        "/transfer KAYNAK HEDEF - Transfer başlat\n"
-        "/iptal - İşlemi durdur\n\n"
-        "**Link Formatları:**\n"
-        "• `https://t.me/12672` → Tüm grup\n"
-        "• `https://t.me/12672/122` → 122'den başla\n"
-        "• `-1001234567890` → Direkt ID\n"
-        "• `-1001234567890/123` → 123'ten başla\n\n"
-        "**Örnek:**\n"
-        "`/transfer https://t.me/12672 https://t.me/hedefkanal`\n"
-        "`/transfer https://t.me/12672/122 -1001234567890`"
-    )
+    logger.info(f"Start komutu alındı! Gönderen: {message.from_user.id}")
+    try:
+        await message.reply("✅ Bot Çalışıyor! Mesajını aldım.")
+    except Exception as e:
+        logger.error(f"Mesaj gönderme hatası: {e}")
 
 @bot.on_message(filters.command("iptal") & filters.private)
 async def cancel_process(client, message):
@@ -406,40 +394,43 @@ async def transfer_media(client, message):
     
     logger.info(f"Transfer tamamlandı: {success}/{total} başarılı")
 
-# ==================== 6. BAŞLATMA ====================
+# ==================== LOGLU MAIN ====================
 async def main():
-    logger.info("🚀 Media Transfer Bot başlatılıyor...")
+    logger.info("🚀 SİSTEM BAŞLATILIYOR...")
     
+    # Değişken Kontrolü
+    if API_ID == 0 or not API_HASH or not BOT_TOKEN:
+        logger.critical("❌ HATA: Render Environment Variables EKSİK! API_ID, API_HASH veya BOT_TOKEN girilmemiş.")
+        return
+
     # Web server
     keep_alive()
-    logger.info("✅ Web server başlatıldı")
+    logger.info("✅ Web server (Flask) devrede")
     
     # Bot başlat
-    await bot.start()
-    logger.info("✅ Bot başlatıldı")
+    try:
+        await bot.start()
+        me = await bot.get_me()
+        logger.info(f"✅ BOT BAŞLATILDI: @{me.username}")
+    except Exception as e:
+        logger.error(f"❌ BOT BAŞLATILAMADI: {e}")
+        return
     
     # Userbot başlat
-    if userbot:
+    if SESSION_STRING:
         try:
-            await userbot.start()
-            logger.info("✅ Userbot başlatıldı")
+            logger.info("👤 Userbot bağlanmaya çalışıyor...")
+            if userbot:
+                await userbot.start()
+                me_user = await userbot.get_me()
+                logger.info(f"✅ USERBOT BAŞLATILDI: {me_user.first_name} (@{me_user.username})")
+            else:
+                logger.error("❌ Userbot objesi oluşturulamadı (Session string hatalı olabilir)")
         except Exception as e:
-            logger.error(f"❌ Userbot başlatılamadı: {e}")
+            logger.error(f"❌ USERBOT HATASI (Session String yanlış olabilir): {e}")
+            # Userbot patlasa bile bot çalışmaya devam etsin diye return yapmıyoruz
     else:
-        logger.warning("⚠️ SESSION_STRING yok! Userbot başlatılamadı.")
+        logger.warning("⚠️ SESSION_STRING yok! Sadece Bot olarak çalışacak.")
     
-    logger.info("✅ Sistem hazır, komutlar bekleniyor...")
-    
-    # Çalışmaya devam et
+    logger.info("✅ SİSTEM HAZIR VE KOMUT BEKLİYOR...")
     await idle()
-    
-    # Kapat
-    await bot.stop()
-    if userbot:
-        try:
-            await userbot.stop()
-        except:
-            pass
-
-if __name__ == '__main__':
-    asyncio.run(main())
