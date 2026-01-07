@@ -243,10 +243,12 @@ async def transfer_media(client, message):
     logger.info(f"Hedef: {dst}")
     
     # Mesajları topla
+    start_text = 'Tüm grup' if not src['start_msg_id'] else f'Mesaj {src["start_msg_id"]}'
+    
     await status.edit(
         f"📸 **Medya taranıyor...**\n\n"
         f"Kaynak: `{src['chat_id']}`\n"
-        f"Başlangıç: {'Tüm grup' if not src['start_msg_id'] else f'Mesaj {src[\"start_msg_id\"]}'}\n\n"
+        f"Başlangıç: {start_text}\n\n"
         f"Sadece **video ve fotoğraf** transfer edilecek."
     )
     
